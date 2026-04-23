@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TURBO ŽELEZO: HYLVÁTY</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; overflow: hidden; background: #000; }
+        #menu {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, #1a1a1a 0%, #000 100%); color: white;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 1000; text-align: center;
+        }
+        h1 { font-size: 3em; color: #ff6600; text-shadow: 0 0 20px #ff6600; margin-bottom: 10px; }
+        button {
+            background: #ff6600; color: white; border: none; padding: 20px 60px;
+            font-size: 1.8em; border-radius: 50px; cursor: pointer; font-weight: bold;
+            box-shadow: 0 0 15px rgba(255,104,0,0.5); transition: 0.3s;
+        }
+        button:hover { transform: scale(1.1); background: #ff8800; }
+        #gameUI { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: none; }
+        #stats { 
+            position: absolute; top: 20px; left: 20px; 
+            color: white; background: rgba(0,0,0,0.85); padding: 20px; border-radius: 15px;
+            border-left: 5px solid #00d4ff; font-size: 1.2em;
+        }
+        #staminaContainer { width: 200px; height: 15px; background: #222; margin-top: 10px; border-radius: 10px; overflow: hidden; }
+        #staminaBar { width: 100%; height: 100%; background: #00d4ff; box-shadow: 0 0 10px #00d4ff; }
+        #minimapContainer { 
+            position: fixed; top: 20px; right: 20px; width: 220px; height: 220px; 
+            background: rgba(0,0,0,0.9); border: 3px solid #00d4ff; border-radius: 20px; overflow: hidden; 
+        }
+        #minimap { width: 100%; height: 100%; }
+        #crosshair { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #00ff00; font-size: 30px; font-weight: 100; }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <h1>🔩 TURBO ŽELEZO 🔩</h1>
+        <p>Hylváty - Ústí nad Orlicí</p><br>
+        <p>Chůze: WASD | Sprint: SHIFT | Sbírání: E</p>
+        <button onclick="startGame()">START</button>
+    </div>
+
+    <div id="gameUI">
+        <div id="stats">
+            <strong>ŽELEZO:</strong> <span id="ironCountUI">0</span>/50<br>
+            <strong>ZDRAVÍ:</strong> <span id="healthUI">100</span>%<br>
+            <div id="staminaContainer"><div id="staminaBar"></div></div>
+        </div>
+        <div id="crosshair">+</div>
+        <div id="minimapContainer"><canvas id="minimap" width="220" height="220"></canvas></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/PointerLockControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let irons = [], police = [], buildingBoxes = [], ironCount = 0, health = 100, stamina = 100;
+        
+        // RYCHLOSTI PODLE TVÉHO PŘÁNÍ
+        let walkSpeed = 200;      
+        let sprintSpeed = 300;    
+        let currentSpeed = walkSpeed;
+
+        let keys = { w:false, s:false, a:false, d:false, shift:false };
+        let gameActive = false;
+        const VIEW_DIST = 100;
+        const FOV_ANGLE = 0.95;
+
+        // Předpokládáme, že model.glb je ve stejné složce na GitHubu
+        const modelPath = 'model.glb'; 
+
+        function startGame() {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameUI').style.display = 'block';
+            init();
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000005);
+            scene.fog = new THREE.FogExp2(0x000005, 0.012);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 2000);
+            renderer = new THREE.WebGLRenderer({antialias: true});
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            document.body.appendChild(renderer.domElement);
+
+            controls = new THREE.PointerLockControls(camera, renderer.domElement);
+            controls.getObject().position.set(0, 1.7, 0);
+            scene.add(controls.getObject());
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+            sun.position.set(50, 100, 50);
+            scene.add(sun);
+
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(2000, 2000), new THREE.MeshStandardMaterial({color: 0x080808}));
+            ground.rotation.x = -Math.PI/2;
+            scene.add(ground);
+
+            for(let i=0; i<60; i++) {
+                let h = 20 + Math.random()*50;
+                let b = new THREE.Mesh(new THREE.BoxGeometry(20, h, 20), new THREE.MeshStandardMaterial({color: 0x111111}));
+                b.position.set((Math.random()-0.5)*700, h/2, (Math.random()-0.5)*700);
+                scene.add(b);
+                buildingBoxes.push(new THREE.Box3().setFromObject(b));
+            }
+
+            const loader = new THREE.GLTFLoader();
+            for(let i=0; i<12; i++) {
+                loader.load(modelPath, (gltf) => {
+                    const p = gltf.scene;
+                    p.position.set((Math.random()-0.5)*600, 0, (Math.random()-0.5)*600);
+                    
+                    const box = new THREE.Box3().setFromObject(p);
+                    const size = box.getSize(new THREE.Vector3());
+                    const scaleFactor = 3 / size.y; 
+                    p.scale.set(scaleFactor, scaleFactor, scaleFactor);
+                    
+                    scene.add(p);
+                    police.push(p);
+                }, undefined, (err) => {
+                    // Záloha (modrý válec)
+                    const fb = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 3), new THREE.MeshStandardMaterial({color: 0x00aaff}));
+                    fb.position.set((Math.random()-0.5)*600, 1.5, (Math.random()-0.5)*600);
+                    scene.add(fb);
+                    police.push(fb);
+                });
+            }
+
+            for(let i=0; i<50; i++) {
+                let iron = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 2), new THREE.MeshStandardMaterial({color: 0xffaa00, metalness: 0.9}));
+                iron.rotation.z = Math.PI/2;
+                iron.position.set((Math.random()-0.5)*600, 0.3, (Math.random()-0.5)*600);
+                scene.add(iron);
+                irons.push(iron);
+            }
+
+            setupInput();
+            gameActive = true;
+            animate();
+        }
+
+        function setupInput() {
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyW') keys.w = true;
+                if (e.code === 'KeyS') keys.s = true;
+                if (e.code === 'KeyA') keys.a = true;
+                if (e.code === 'KeyD') keys.d = true;
+                if (e.code === 'ShiftLeft') keys.shift = true;
+                if (e.code === 'KeyE') collect();
+            });
+            document.addEventListener('keyup', (e) => {
+                if (e.code === 'KeyW') keys.w = false;
+                if (e.code === 'KeyS') keys.s = false;
+                if (e.code === 'KeyA') keys.a = false;
+                if (e.code === 'KeyD') keys.d = false;
+                if (e.code === 'ShiftLeft') keys.shift = false;
+            });
+            renderer.domElement.addEventListener('click', () => controls.lock());
+        }
+
+        function collect() {
+            let pPos = controls.getObject().position;
+            for(let i=irons.length-1; i>=0; i--) {
+                if(irons[i].position.distanceTo(pPos) < 7) {
+                    scene.remove(irons[i]);
+                    irons.splice(i, 1);
+                    ironCount++;
+                    document.getElementById('ironCountUI').textContent = ironCount;
+                }
+            }
+        }
+
+        function checkCollision(pos) {
+            let playerBox = new THREE.Box3().setFromCenterAndSize(pos, new THREE.Vector3(1.5, 2, 1.5));
+            for (let box of buildingBoxes) {
+                if (playerBox.intersectsBox(box)) return true;
+            }
+            return false;
+        }
+
+        function drawMinimap() {
+            const canvas = document.getElementById('minimap');
+            const ctx = canvas.getContext('2d');
+            const pPos = controls.getObject().position;
+            const zoom = 7; 
+            ctx.clearRect(0,0,220,220);
+
+            police.forEach(p => {
+                let x = (p.position.x - pPos.x) / zoom + 110;
+                let z = (p.position.z - pPos.z) / zoom + 110;
+                if(x > 0 && x < 220 && z > 0 && z < 220) {
+                    ctx.fillStyle = "rgba(0, 212, 255, 0.3)";
+                    ctx.beginPath();
+                    ctx.moveTo(x, z);
+                    let angleCenter = -p.rotation.y + Math.PI/2; 
+                    ctx.arc(x, z, VIEW_DIST / zoom, angleCenter - FOV_ANGLE, angleCenter + FOV_ANGLE);
+                    ctx.fill();
+                    ctx.fillStyle = "#ffffff";
+                    ctx.beginPath(); ctx.arc(x,z,5,0,7); ctx.fill();
+                    ctx.strokeStyle = "#00d4ff"; ctx.stroke();
+                }
+            });
+
+            ctx.fillStyle = "#ff0000";
+            ctx.beginPath(); ctx.arc(110,110,7,0,7); ctx.fill();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!gameActive || !controls.isLocked) return;
+
+            const delta = 0.016;
+            if (keys.shift && stamina > 0 && (keys.w || keys.s || keys.a || keys.d)) {
+                currentSpeed = sprintSpeed;
+                stamina -= 1.0; 
+            } else {
+                currentSpeed = walkSpeed;
+                if (stamina < 100) stamina += 0.7;
+            }
+            document.getElementById('staminaBar').style.width = stamina + "%";
+
+            let oldPos = controls.getObject().position.clone();
+            let moveX = Number(keys.d) - Number(keys.a);
+            let moveZ = Number(keys.w) - Number(keys.s);
+
+            if(moveZ !== 0 || moveX !== 0) {
+                controls.moveForward(moveZ * currentSpeed * delta * 0.02);
+                controls.moveRight(moveX * currentSpeed * delta * 0.02);
+                if(checkCollision(controls.getObject().position)) controls.getObject().position.copy(oldPos);
+            }
+
+            police.forEach(p => {
+                let pPos = controls.getObject().position;
+                let dist = p.position.distanceTo(pPos);
+                let dir = new THREE.Vector3().subVectors(pPos, p.position).normalize();
+                let viewDir = new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0), p.rotation.y);
+                let angle = viewDir.angleTo(dir);
+
+                if (dist < VIEW_DIST && angle < FOV_ANGLE) {
+                    p.lookAt(pPos.x, 0, pPos.z);
+                    p.position.add(dir.multiplyScalar(0.18)); 
+                    if(dist < 4) {
+                        health -= 1.2;
+                        document.getElementById('healthUI').textContent = Math.floor(health);
+                        if(health <= 0) { alert("POLICIE TĚ DOSTALA!"); location.reload(); }
+                    }
+                } else {
+                    p.rotation.y += 0.02;
+                }
+            });
+
+            drawMinimap();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
