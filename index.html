@@ -63,17 +63,16 @@
         let scene, camera, renderer, controls;
         let irons = [], police = [], buildingBoxes = [], ironCount = 0, health = 100, stamina = 100;
         
-        // RYCHLOSTI PODLE TVÉHO PŘÁNÍ
         let walkSpeed = 200;      
         let sprintSpeed = 300;    
         let currentSpeed = walkSpeed;
+        const policeBaseSpeed = 240; // O 20% rychlejší než hráčova chůze
 
         let keys = { w:false, s:false, a:false, d:false, shift:false };
         let gameActive = false;
-        const VIEW_DIST = 100;
-        const FOV_ANGLE = 0.95;
+        const VIEW_DIST = 120;
+        const FOV_ANGLE = 1.1;
 
-        // Předpokládáme, že model.glb je ve stejné složce na GitHubu
         const modelPath = 'model.glb'; 
 
         function startGame() {
@@ -106,6 +105,7 @@
             ground.rotation.x = -Math.PI/2;
             scene.add(ground);
 
+            // Budovy
             for(let i=0; i<60; i++) {
                 let h = 20 + Math.random()*50;
                 let b = new THREE.Mesh(new THREE.BoxGeometry(20, h, 20), new THREE.MeshStandardMaterial({color: 0x111111}));
@@ -114,8 +114,9 @@
                 buildingBoxes.push(new THREE.Box3().setFromObject(b));
             }
 
+            // NAČÍTÁNÍ MODELU POLICISTY
             const loader = new THREE.GLTFLoader();
-            for(let i=0; i<12; i++) {
+            for(let i=0; i<15; i++) {
                 loader.load(modelPath, (gltf) => {
                     const p = gltf.scene;
                     p.position.set((Math.random()-0.5)*600, 0, (Math.random()-0.5)*600);
@@ -128,7 +129,6 @@
                     scene.add(p);
                     police.push(p);
                 }, undefined, (err) => {
-                    // Záloha (modrý válec)
                     const fb = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 3), new THREE.MeshStandardMaterial({color: 0x00aaff}));
                     fb.position.set((Math.random()-0.5)*600, 1.5, (Math.random()-0.5)*600);
                     scene.add(fb);
@@ -136,6 +136,7 @@
                 });
             }
 
+            // Železo
             for(let i=0; i<50; i++) {
                 let iron = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 2), new THREE.MeshStandardMaterial({color: 0xffaa00, metalness: 0.9}));
                 iron.rotation.z = Math.PI/2;
@@ -199,20 +200,19 @@
                 let x = (p.position.x - pPos.x) / zoom + 110;
                 let z = (p.position.z - pPos.z) / zoom + 110;
                 if(x > 0 && x < 220 && z > 0 && z < 220) {
-                    ctx.fillStyle = "rgba(0, 212, 255, 0.3)";
+                    ctx.fillStyle = "rgba(0, 212, 255, 0.2)";
                     ctx.beginPath();
                     ctx.moveTo(x, z);
                     let angleCenter = -p.rotation.y + Math.PI/2; 
                     ctx.arc(x, z, VIEW_DIST / zoom, angleCenter - FOV_ANGLE, angleCenter + FOV_ANGLE);
                     ctx.fill();
                     ctx.fillStyle = "#ffffff";
-                    ctx.beginPath(); ctx.arc(x,z,5,0,7); ctx.fill();
-                    ctx.strokeStyle = "#00d4ff"; ctx.stroke();
+                    ctx.beginPath(); ctx.arc(x,z,4,0,7); ctx.fill();
                 }
             });
 
             ctx.fillStyle = "#ff0000";
-            ctx.beginPath(); ctx.arc(110,110,7,0,7); ctx.fill();
+            ctx.beginPath(); ctx.arc(110,110,6,0,7); ctx.fill();
         }
 
         function animate() {
@@ -220,12 +220,15 @@
             if(!gameActive || !controls.isLocked) return;
 
             const delta = 0.016;
+            const time = performance.now() * 0.005;
+
+            // POHYB HRÁČE
             if (keys.shift && stamina > 0 && (keys.w || keys.s || keys.a || keys.d)) {
                 currentSpeed = sprintSpeed;
-                stamina -= 1.0; 
+                stamina -= 0.8; 
             } else {
                 currentSpeed = walkSpeed;
-                if (stamina < 100) stamina += 0.7;
+                if (stamina < 100) stamina += 0.5;
             }
             document.getElementById('staminaBar').style.width = stamina + "%";
 
@@ -239,7 +242,8 @@
                 if(checkCollision(controls.getObject().position)) controls.getObject().position.copy(oldPos);
             }
 
-            police.forEach(p => {
+            // POHYB A ANIMACE POLICISTŮ
+            police.forEach((p, index) => {
                 let pPos = controls.getObject().position;
                 let dist = p.position.distanceTo(pPos);
                 let dir = new THREE.Vector3().subVectors(pPos, p.position).normalize();
@@ -248,14 +252,24 @@
 
                 if (dist < VIEW_DIST && angle < FOV_ANGLE) {
                     p.lookAt(pPos.x, 0, pPos.z);
-                    p.position.add(dir.multiplyScalar(0.18)); 
+                    // Rychlejší pohyb o 20%
+                    p.position.add(dir.multiplyScalar(policeBaseSpeed * delta * 0.012)); 
+
+                    // Falešná animace chození
+                    p.rotation.z = Math.sin(time * 3 + index) * 0.15; // Houpání
+                    p.position.y = Math.abs(Math.sin(time * 6 + index)) * 0.15; // Kroky
+                    p.rotation.x = 0.1; // Předklon
+
                     if(dist < 4) {
-                        health -= 1.2;
+                        health -= 1.0;
                         document.getElementById('healthUI').textContent = Math.floor(health);
                         if(health <= 0) { alert("POLICIE TĚ DOSTALA!"); location.reload(); }
                     }
                 } else {
-                    p.rotation.y += 0.02;
+                    p.rotation.y += 0.01;
+                    p.rotation.z = 0;
+                    p.position.y = 0;
+                    p.rotation.x = 0;
                 }
             });
 
