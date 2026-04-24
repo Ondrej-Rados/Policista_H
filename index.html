@@ -3,24 +3,40 @@
 <head>
 <meta charset="UTF-8">
 <title>3D Survival Game</title>
+
 <style>
-body { margin: 0; overflow: hidden; font-family: Arial; background: black; }
+body { margin: 0; overflow: hidden; background: black; font-family: Arial; }
+
 #ui {
-  position: absolute; top: 10px; left: 10px; color: white;
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
 }
+
 #minimap {
-  position: absolute; bottom: 10px; right: 10px;
-  width: 150px; height: 150px; border-radius: 50%;
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
   background: rgba(0,0,0,0.5);
 }
+
 #shop {
-  position: absolute; top: 50%; left: 50%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   transform: translate(-50%, -50%);
-  background: black; color: white;
-  padding: 20px; display: none;
+  background: black;
+  color: white;
+  padding: 20px;
+  display: none;
 }
 </style>
 </head>
+
 <body>
 
 <div id="ui">
@@ -33,37 +49,40 @@ body { margin: 0; overflow: hidden; font-family: Arial; background: black; }
 
 <div id="shop">
   <h2>Shop</h2>
-  <button onclick="buyUpgrade()">Backpack (500 CZK)</button>
-  <br><br>
+  <button onclick="buyBackpack()">Backpack (500 CZK)</button><br><br>
+  <button onclick="heal()">Heal (200 CZK)</button><br><br>
+  <button onclick="buySpeed()">Speed (300 CZK)</button><br><br>
   <button onclick="closeShop()">Close</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.158/examples/js/controls/PointerLockControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.158/examples/js/loaders/GLTFLoader.js"></script>
 
 <script>
-let scene = new THREE.Scene();
+// SCÉNA
+const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 scene.fog = new THREE.FogExp2(0x000000, 0.03);
 
-let camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-let renderer = new THREE.WebGLRenderer();
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+const renderer = new THREE.WebGLRenderer();
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// OVLÁDÁNÍ
 const controls = new THREE.PointerLockControls(camera, document.body);
 document.body.onclick = () => controls.lock();
-
 scene.add(controls.getObject());
 
 camera.position.y = 1.7;
 
-// světlo
+// SVĚTLO
 const light = new THREE.DirectionalLight(0xaaaaee, 0.5);
 light.position.set(50,100,50);
 scene.add(light);
 
-// zem
+// ZEM
 const texture = new THREE.TextureLoader().load("podlaha.jpg");
 texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
 texture.repeat.set(50,50);
@@ -75,9 +94,8 @@ const ground = new THREE.Mesh(
 ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
-// hráč
+// HRÁČ
 let player = {
-  velocity: new THREE.Vector3(),
   speed: 0.1,
   scrap: 0,
   money: 0,
@@ -85,88 +103,99 @@ let player = {
   capacity: 50
 };
 
-// pohyb
+// POHYB
 let keys = {};
 document.addEventListener("keydown", e => {
   keys[e.key.toLowerCase()] = true;
 
-  if (e.key === "f") openShop();
-  if (e.key === "e") collectScrap();
+  if (e.key === "e") {
+    collectScrap();
+
+    if (isNearShop()) openShop();
+  }
 });
 
 document.addEventListener("keyup", e => {
   keys[e.key.toLowerCase()] = false;
 });
 
-// budovy
+// 3D DOMY
+const loader = new THREE.GLTFLoader();
 let buildings = [];
-for(let i=0;i<40;i++){
-  const geo = new THREE.BoxGeometry(5, Math.random()*20+5, 5);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x333333 });
-  const b = new THREE.Mesh(geo, mat);
-  b.position.set(
-    (Math.random()-0.5)*280,
-    geo.parameters.height/2,
-    (Math.random()-0.5)*280
-  );
-  scene.add(b);
-  buildings.push(b);
+
+function createHouse(x, z) {
+  loader.load("models/Cyprys_House.glb", (gltf) => {
+    const house = gltf.scene;
+
+    house.position.set(x, 0, z);
+    house.scale.set(2,2,2);
+    scene.add(house);
+
+    // kolize
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(10,8,10),
+      new THREE.MeshBasicMaterial({ visible:false })
+    );
+
+    box.position.set(x,4,z);
+    scene.add(box);
+    buildings.push(box);
+
+    // světlo
+    const light = new THREE.PointLight(0xffeeaa, 0.4, 10);
+    light.position.set(x,3,z);
+    scene.add(light);
+  });
 }
 
-// scrap
+// GENEROVÁNÍ DOMŮ
+for(let i=0;i<25;i++){
+  const x = (Math.random()-0.5)*280;
+  const z = (Math.random()-0.5)*280;
+  createHouse(x,z);
+}
+
+// SHOP BUDOVA
+let shopBuilding = new THREE.Mesh(
+  new THREE.BoxGeometry(10,6,10),
+  new THREE.MeshStandardMaterial({ color: 0x00ff00 })
+);
+shopBuilding.position.set(0,3,0);
+scene.add(shopBuilding);
+
+const shopLight = new THREE.PointLight(0x00ff00, 2, 20);
+shopLight.position.set(0,6,0);
+scene.add(shopLight);
+
+function isNearShop(){
+  return camera.position.distanceTo(shopBuilding.position) < 8;
+}
+
+// SCRAP
 let scraps = [];
 for(let i=0;i<50;i++){
   const s = new THREE.Mesh(
     new THREE.CylinderGeometry(0.5,0.5,1,8),
     new THREE.MeshBasicMaterial({ color: 0xffd700 })
   );
+
   s.position.set(
     (Math.random()-0.5)*280,
     0.5,
     (Math.random()-0.5)*280
   );
+
   scene.add(s);
   scraps.push(s);
 }
 
-// policie
-let police = [];
-for(let i=0;i<3;i++){
-  const p = new THREE.Mesh(
-    new THREE.BoxGeometry(2,3,2),
-    new THREE.MeshBasicMaterial({ color: 0x0000ff })
-  );
-  p.position.set(
-    (Math.random()-0.5)*200,
-    1.5,
-    (Math.random()-0.5)*200
-  );
-  scene.add(p);
-  police.push(p);
-}
-
-// minimap
-const minimap = document.getElementById("minimap");
-const ctx = minimap.getContext("2d");
-
-// shop
-function openShop(){ document.getElementById("shop").style.display="block"; }
-function closeShop(){ document.getElementById("shop").style.display="none"; }
-
-function buyUpgrade(){
-  if(player.money >= 500){
-    player.money -= 500;
-    player.capacity = 100;
-  }
-}
-
-// sběr
 function collectScrap(){
-  scraps.forEach((s, i) => {
-    if(s.position.distanceTo(camera.position) < 3){
+  scraps.forEach((s,i)=>{
+    if(s.position.distanceTo(camera.position)<3){
       if(player.scrap < player.capacity){
         player.scrap++;
         player.money += Math.floor(Math.random()*6)+15;
+
         scene.remove(s);
         scraps.splice(i,1);
       }
@@ -174,8 +203,58 @@ function collectScrap(){
   });
 }
 
-// update
+// POLICIE (zpomalena)
+let police = [];
+for(let i=0;i<3;i++){
+  const p = new THREE.Mesh(
+    new THREE.BoxGeometry(2,3,2),
+    new THREE.MeshBasicMaterial({ color: 0x0000ff })
+  );
+
+  p.position.set(
+    (Math.random()-0.5)*200,
+    1.5,
+    (Math.random()-0.5)*200
+  );
+
+  scene.add(p);
+  police.push(p);
+}
+
+// SHOP
+function openShop(){
+  document.getElementById("shop").style.display="block";
+}
+function closeShop(){
+  document.getElementById("shop").style.display="none";
+}
+
+function buyBackpack(){
+  if(player.money >= 500){
+    player.money -= 500;
+    player.capacity = 100;
+  }
+}
+function heal(){
+  if(player.money >= 200){
+    player.money -= 200;
+    player.hp = Math.min(100, player.hp+30);
+  }
+}
+function buySpeed(){
+  if(player.money >= 300){
+    player.money -= 300;
+    player.speed += 0.05;
+  }
+}
+
+// MINIMAPA
+const minimap = document.getElementById("minimap");
+const ctx = minimap.getContext("2d");
+
+// UPDATE
 function update(){
+
   let dir = new THREE.Vector3();
 
   if(keys["w"]) dir.z -= 1;
@@ -188,20 +267,22 @@ function update(){
   controls.moveRight(dir.x * player.speed);
   controls.moveForward(dir.z * player.speed);
 
-  // hranice mapy
+  // hranice
   camera.position.x = Math.max(-150, Math.min(150, camera.position.x));
   camera.position.z = Math.max(-150, Math.min(150, camera.position.z));
 
-  // policie AI
-  police.forEach(p => {
+  // policie AI (pomalejší)
+  police.forEach(p=>{
     let dist = p.position.distanceTo(camera.position);
+
     if(dist < 100){
       let dir = camera.position.clone().sub(p.position).normalize();
-      p.position.add(dir.multiplyScalar(0.05));
+      p.position.add(dir.multiplyScalar(0.02)); // zpomaleno
     }
 
     if(dist < 2){
       player.hp -= 0.5;
+
       if(player.hp <= 0){
         alert("Byl jsi zatčen!");
         location.reload();
@@ -214,35 +295,26 @@ function update(){
   document.getElementById("money").innerText = player.money;
   document.getElementById("hp").innerText = Math.floor(player.hp);
 
-  // minimap
+  // MINIMAPA
   ctx.clearRect(0,0,150,150);
-
   let scale = 150/300;
 
   // hráč
   ctx.fillStyle="red";
   ctx.beginPath();
-  ctx.arc(
-    75 + camera.position.x*scale,
-    75 + camera.position.z*scale,
-    4,0,Math.PI*2
-  );
+  ctx.arc(75 + camera.position.x*scale, 75 + camera.position.z*scale, 4,0,Math.PI*2);
   ctx.fill();
 
   // policie
   ctx.fillStyle="blue";
   police.forEach(p=>{
     ctx.beginPath();
-    ctx.arc(
-      75 + p.position.x*scale,
-      75 + p.position.z*scale,
-      3,0,Math.PI*2
-    );
+    ctx.arc(75 + p.position.x*scale, 75 + p.position.z*scale, 3,0,Math.PI*2);
     ctx.fill();
   });
 }
 
-// render loop
+// LOOP
 function animate(){
   requestAnimationFrame(animate);
   update();
