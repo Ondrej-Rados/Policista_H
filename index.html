@@ -2,326 +2,157 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>3D Survival Game</title>
-
+<title>Hylváty Heist – Ultra Realistická Verze (FULL FIXED)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
-body { margin: 0; overflow: hidden; background: black; font-family: Arial; }
-
-#ui {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  color: white;
-}
-
-#minimap {
-  position: absolute;
-  bottom: 10px;
-  right: 10px;
-  width: 150px;
-  height: 150px;
-  border-radius: 50%;
-  background: rgba(0,0,0,0.5);
-}
-
-#shop {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: black;
-  color: white;
-  padding: 20px;
-  display: none;
-}
+body{margin:0;overflow:hidden;background:#000}
+canvas{display:block}
 </style>
 </head>
-
 <body>
 
-<div id="ui">
-  Scrap: <span id="scrap">0</span><br>
-  Money: <span id="money">0</span> CZK<br>
-  HP: <span id="hp">100</span>
-</div>
-
-<canvas id="minimap"></canvas>
-
-<div id="shop">
-  <h2>Shop</h2>
-  <button onclick="buyBackpack()">Backpack (500 CZK)</button><br><br>
-  <button onclick="heal()">Heal (200 CZK)</button><br><br>
-  <button onclick="buySpeed()">Speed (300 CZK)</button><br><br>
-  <button onclick="closeShop()">Close</button>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.158/examples/js/controls/PointerLockControls.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.158/examples/js/loaders/GLTFLoader.js"></script>
+<canvas id="canvas"></canvas>
 
 <script>
-// SCÉNA
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x000000);
-scene.fog = new THREE.FogExp2(0x000000, 0.03);
+'use strict';
 
-const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer();
-renderer.setSize(innerWidth, innerHeight);
-document.body.appendChild(renderer.domElement);
-
-// OVLÁDÁNÍ
-const controls = new THREE.PointerLockControls(camera, document.body);
-document.body.onclick = () => controls.lock();
-scene.add(controls.getObject());
-
-camera.position.y = 1.7;
-
-// SVĚTLO
-const light = new THREE.DirectionalLight(0xaaaaee, 0.5);
-light.position.set(50,100,50);
-scene.add(light);
-
-// ZEM
-const texture = new THREE.TextureLoader().load("podlaha.jpg");
-texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-texture.repeat.set(50,50);
-
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(300,300),
-  new THREE.MeshStandardMaterial({ map: texture })
-);
-ground.rotation.x = -Math.PI/2;
-scene.add(ground);
-
-// HRÁČ
-let player = {
-  speed: 0.1,
-  scrap: 0,
-  money: 0,
-  hp: 100,
-  capacity: 50
+// CONFIG
+const CFG={
+  TIME:150,
+  WALK:5.5,
+  SPRINT:10.5,
+  H:1.78
 };
 
-// POHYB
-let keys = {};
-document.addEventListener("keydown", e => {
-  keys[e.key.toLowerCase()] = true;
+// STATE
+let scene,camera,renderer;
+let keys={},yaw=0,pitch=0;
+let playerPos=new THREE.Vector3(2,CFG.H,2);
+let clock=new THREE.Clock();
 
-  if (e.key === "e") {
-    collectScrap();
-
-    if (isNearShop()) openShop();
+// AUDIO FIX
+let audioCtx=null;
+function initAudio(){
+  try{
+    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  }catch(e){
+    console.warn("Audio nepodporováno");
   }
-});
+}
 
-document.addEventListener("keyup", e => {
-  keys[e.key.toLowerCase()] = false;
-});
+// INIT
+function init(){
+  const canvas=document.getElementById('canvas');
 
-// 3D DOMY
-const loader = new THREE.GLTFLoader();
-let buildings = [];
+  renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+  renderer.setSize(window.innerWidth,window.innerHeight);
 
-function createHouse(x, z) {
-  loader.load("models/Cyprys_House.glb", (gltf) => {
-    const house = gltf.scene;
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x0d0e18);
 
-    house.position.set(x, 0, z);
-    house.scale.set(2,2,2);
-    scene.add(house);
+  camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,200);
+  camera.position.copy(playerPos);
 
-    // kolize
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(10,8,10),
-      new THREE.MeshBasicMaterial({ visible:false })
+  const light=new THREE.DirectionalLight(0xffffff,1);
+  light.position.set(10,20,10);
+  scene.add(light);
+
+  const amb=new THREE.AmbientLight(0x404040);
+  scene.add(amb);
+
+  // GROUND
+  const ground=new THREE.Mesh(
+    new THREE.PlaneGeometry(200,200),
+    new THREE.MeshStandardMaterial({color:0x222222})
+  );
+  ground.rotation.x=-Math.PI/2;
+  scene.add(ground);
+
+  // TEST OBJEKTY (železo)
+  for(let i=0;i<20;i++){
+    const box=new THREE.Mesh(
+      new THREE.BoxGeometry(1,1,1),
+      new THREE.MeshStandardMaterial({color:0xff6a00})
     );
-
-    box.position.set(x,4,z);
+    box.position.set((Math.random()-0.5)*50,0.5,(Math.random()-0.5)*50);
     scene.add(box);
-    buildings.push(box);
+  }
 
-    // světlo
-    const light = new THREE.PointLight(0xffeeaa, 0.4, 10);
-    light.position.set(x,3,z);
-    scene.add(light);
+  // VOZIDLA (OPRAVA MINUSU)
+  const vehicles = [
+    [20,0,-16,0x334455],
+    [-15,0,-26,0x553322],
+    [5,0,-36,0x224433],
+    [-30,0,20,0x443322]
+  ];
+
+  vehicles.forEach(v=>{
+    const car=new THREE.Mesh(
+      new THREE.BoxGeometry(2,1,4),
+      new THREE.MeshStandardMaterial({color:v[3]})
+    );
+    car.position.set(v[0],0.5,v[2]);
+    scene.add(car);
+  });
+
+  setupInput();
+  animate();
+}
+
+// INPUT
+function setupInput(){
+  document.addEventListener('keydown',e=>keys[e.code]=true);
+  document.addEventListener('keyup',e=>keys[e.code]=false);
+
+  document.addEventListener('mousemove',e=>{
+    yaw -= e.movementX*0.002;
+    pitch -= e.movementY*0.002;
+    pitch=Math.max(-1.5,Math.min(1.5,pitch));
+  });
+
+  document.body.addEventListener('click',()=>{
+    document.body.requestPointerLock();
   });
 }
-
-// GENEROVÁNÍ DOMŮ
-for(let i=0;i<25;i++){
-  const x = (Math.random()-0.5)*280;
-  const z = (Math.random()-0.5)*280;
-  createHouse(x,z);
-}
-
-// SHOP BUDOVA
-let shopBuilding = new THREE.Mesh(
-  new THREE.BoxGeometry(10,6,10),
-  new THREE.MeshStandardMaterial({ color: 0x00ff00 })
-);
-shopBuilding.position.set(0,3,0);
-scene.add(shopBuilding);
-
-const shopLight = new THREE.PointLight(0x00ff00, 2, 20);
-shopLight.position.set(0,6,0);
-scene.add(shopLight);
-
-function isNearShop(){
-  return camera.position.distanceTo(shopBuilding.position) < 8;
-}
-
-// SCRAP
-let scraps = [];
-for(let i=0;i<50;i++){
-  const s = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5,0.5,1,8),
-    new THREE.MeshBasicMaterial({ color: 0xffd700 })
-  );
-
-  s.position.set(
-    (Math.random()-0.5)*280,
-    0.5,
-    (Math.random()-0.5)*280
-  );
-
-  scene.add(s);
-  scraps.push(s);
-}
-
-function collectScrap(){
-  scraps.forEach((s,i)=>{
-    if(s.position.distanceTo(camera.position)<3){
-      if(player.scrap < player.capacity){
-        player.scrap++;
-        player.money += Math.floor(Math.random()*6)+15;
-
-        scene.remove(s);
-        scraps.splice(i,1);
-      }
-    }
-  });
-}
-
-// POLICIE (zpomalena)
-let police = [];
-for(let i=0;i<3;i++){
-  const p = new THREE.Mesh(
-    new THREE.BoxGeometry(2,3,2),
-    new THREE.MeshBasicMaterial({ color: 0x0000ff })
-  );
-
-  p.position.set(
-    (Math.random()-0.5)*200,
-    1.5,
-    (Math.random()-0.5)*200
-  );
-
-  scene.add(p);
-  police.push(p);
-}
-
-// SHOP
-function openShop(){
-  document.getElementById("shop").style.display="block";
-}
-function closeShop(){
-  document.getElementById("shop").style.display="none";
-}
-
-function buyBackpack(){
-  if(player.money >= 500){
-    player.money -= 500;
-    player.capacity = 100;
-  }
-}
-function heal(){
-  if(player.money >= 200){
-    player.money -= 200;
-    player.hp = Math.min(100, player.hp+30);
-  }
-}
-function buySpeed(){
-  if(player.money >= 300){
-    player.money -= 300;
-    player.speed += 0.05;
-  }
-}
-
-// MINIMAPA
-const minimap = document.getElementById("minimap");
-const ctx = minimap.getContext("2d");
 
 // UPDATE
 function update(){
+  const dt=Math.min(clock.getDelta(),0.05);
 
-  let dir = new THREE.Vector3();
+  const speed=(keys["ShiftLeft"]?CFG.SPRINT:CFG.WALK)*dt;
 
-  if(keys["w"]) dir.z -= 1;
-  if(keys["s"]) dir.z += 1;
-  if(keys["a"]) dir.x -= 1;
-  if(keys["d"]) dir.x += 1;
+  let dir=new THREE.Vector3();
 
-  dir.normalize();
+  if(keys["KeyW"])dir.z-=1;
+  if(keys["KeyS"])dir.z+=1;
+  if(keys["KeyA"])dir.x-=1;
+  if(keys["KeyD"])dir.x+=1;
 
-  controls.moveRight(dir.x * player.speed);
-  controls.moveForward(dir.z * player.speed);
+  if(dir.length()>0){
+    dir.normalize();
+    dir.applyEuler(new THREE.Euler(0,yaw,0));
+    playerPos.add(dir.multiplyScalar(speed));
+  }
 
-  // hranice
-  camera.position.x = Math.max(-150, Math.min(150, camera.position.x));
-  camera.position.z = Math.max(-150, Math.min(150, camera.position.z));
-
-  // policie AI (pomalejší)
-  police.forEach(p=>{
-    let dist = p.position.distanceTo(camera.position);
-
-    if(dist < 100){
-      let dir = camera.position.clone().sub(p.position).normalize();
-      p.position.add(dir.multiplyScalar(0.02)); // zpomaleno
-    }
-
-    if(dist < 2){
-      player.hp -= 0.5;
-
-      if(player.hp <= 0){
-        alert("Byl jsi zatčen!");
-        location.reload();
-      }
-    }
-  });
-
-  // UI
-  document.getElementById("scrap").innerText = player.scrap;
-  document.getElementById("money").innerText = player.money;
-  document.getElementById("hp").innerText = Math.floor(player.hp);
-
-  // MINIMAPA
-  ctx.clearRect(0,0,150,150);
-  let scale = 150/300;
-
-  // hráč
-  ctx.fillStyle="red";
-  ctx.beginPath();
-  ctx.arc(75 + camera.position.x*scale, 75 + camera.position.z*scale, 4,0,Math.PI*2);
-  ctx.fill();
-
-  // policie
-  ctx.fillStyle="blue";
-  police.forEach(p=>{
-    ctx.beginPath();
-    ctx.arc(75 + p.position.x*scale, 75 + p.position.z*scale, 3,0,Math.PI*2);
-    ctx.fill();
-  });
+  camera.position.copy(playerPos);
+  camera.rotation.order="YXZ";
+  camera.rotation.y=yaw;
+  camera.rotation.x=pitch;
 }
 
 // LOOP
 function animate(){
   requestAnimationFrame(animate);
   update();
-  renderer.render(scene, camera);
+  renderer.render(scene,camera);
 }
-animate();
 
+// START
+window.addEventListener('load',()=>{
+  initAudio();
+  init();
+});
 </script>
+
 </body>
 </html>
