@@ -2,35 +2,28 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>Hylváty Heist – Ultra Realistická Verze (FULL FIXED)</title>
+<title>Hylváty Heist – Ultra Realistická Verze (FIXED)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
-body{margin:0;overflow:hidden;background:#000}
+html,body{margin:0;height:100%;overflow:hidden;background:#000}
 canvas{display:block}
 </style>
 </head>
 <body>
-
 <canvas id="canvas"></canvas>
 
 <script>
 'use strict';
 
 // CONFIG
-const CFG={
-  TIME:150,
-  WALK:5.5,
-  SPRINT:10.5,
-  H:1.78
-};
+const CFG={TIME:150,WALK:5.5,SPRINT:10.5,H:1.78};
 
 // STATE
-let scene,camera,renderer;
+let scene,camera,renderer,clock;
 let keys={},yaw=0,pitch=0;
 let playerPos=new THREE.Vector3(2,CFG.H,2);
-let clock=new THREE.Clock();
 
-// AUDIO FIX
+// AUDIO (FIX)
 let audioCtx=null;
 function initAudio(){
   try{
@@ -38,6 +31,30 @@ function initAudio(){
   }catch(e){
     console.warn("Audio nepodporováno");
   }
+}
+
+// TEXTURE FIX
+function mkTex(fn){
+  const t=new THREE.CanvasTexture(fn());
+  t.wrapS=t.wrapT=THREE.RepeatWrapping;
+  return t;
+}
+
+function asphaltTex(){
+  return mkTex(()=>{
+    const c=document.createElement('canvas');
+    c.width=c.height=256;
+    const x=c.getContext('2d');
+
+    x.fillStyle='#16161c';
+    x.fillRect(0,0,256,256);
+
+    for(let i=0;i<5000;i++){
+      x.fillStyle=`rgba(255,255,255,${Math.random()*0.03})`;
+      x.fillRect(Math.random()*256,Math.random()*256,1,1);
+    }
+    return c;
+  });
 }
 
 // INIT
@@ -53,6 +70,8 @@ function init(){
   camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,200);
   camera.position.copy(playerPos);
 
+  clock=new THREE.Clock();
+
   const light=new THREE.DirectionalLight(0xffffff,1);
   light.position.set(10,20,10);
   scene.add(light);
@@ -63,25 +82,35 @@ function init(){
   // GROUND
   const ground=new THREE.Mesh(
     new THREE.PlaneGeometry(200,200),
-    new THREE.MeshStandardMaterial({color:0x222222})
+    new THREE.MeshStandardMaterial({map:asphaltTex()})
   );
   ground.rotation.x=-Math.PI/2;
   scene.add(ground);
 
-  // TEST OBJEKTY (železo)
+  // BUILDINGS
   for(let i=0;i<20;i++){
+    const b=new THREE.Mesh(
+      new THREE.BoxGeometry(5,5+Math.random()*10,5),
+      new THREE.MeshStandardMaterial({color:0x333344})
+    );
+    b.position.set((Math.random()-0.5)*80,b.scale.y/2,(Math.random()-0.5)*80);
+    scene.add(b);
+  }
+
+  // IRON OBJECTS
+  for(let i=0;i<30;i++){
     const box=new THREE.Mesh(
       new THREE.BoxGeometry(1,1,1),
       new THREE.MeshStandardMaterial({color:0xff6a00})
     );
-    box.position.set((Math.random()-0.5)*50,0.5,(Math.random()-0.5)*50);
+    box.position.set((Math.random()-0.5)*60,0.5,(Math.random()-0.5)*60);
     scene.add(box);
   }
 
-  // VOZIDLA (OPRAVA MINUSU)
-  const vehicles = [
+  // VEHICLES (FIXED MINUS!)
+  const vehicles=[
     [20,0,-16,0x334455],
-    [-15,0,-26,0x553322],
+    [-15,0,-26,0x553322], // ← opraveno
     [5,0,-36,0x224433],
     [-30,0,20,0x443322]
   ];
@@ -105,9 +134,11 @@ function setupInput(){
   document.addEventListener('keyup',e=>keys[e.code]=false);
 
   document.addEventListener('mousemove',e=>{
-    yaw -= e.movementX*0.002;
-    pitch -= e.movementY*0.002;
-    pitch=Math.max(-1.5,Math.min(1.5,pitch));
+    if(document.pointerLockElement){
+      yaw -= e.movementX*0.002;
+      pitch -= e.movementY*0.002;
+      pitch=Math.max(-1.5,Math.min(1.5,pitch));
+    }
   });
 
   document.body.addEventListener('click',()=>{
@@ -153,6 +184,5 @@ window.addEventListener('load',()=>{
   init();
 });
 </script>
-
 </body>
 </html>
