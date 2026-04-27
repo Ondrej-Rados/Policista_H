@@ -2,211 +2,219 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>Hylváty Heist – Funkční verze</title>
+<title>Hylváty Heist 3.0</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
 body{margin:0;overflow:hidden;background:#000;font-family:sans-serif}
-#hud{position:fixed;top:10px;left:10px;color:white;z-index:10}
+#hud{position:fixed;top:10px;left:10px;color:white}
+#msg{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);color:#ff6a00}
 </style>
 </head>
 <body>
 
 <div id="hud">
-  <div>Batoh: <span id="carry">0</span> kg</div>
-  <div>Odvezeno: <span id="total">0</span> kg</div>
-  <div>Čas: <span id="time">150</span>s</div>
+Batoh: <span id="c">0</span><br>
+Odvezeno: <span id="t">0</span><br>
+Heat: <span id="h">0</span>%<br>
+Stamina: <span id="s">100</span>%<br>
+Čas: <span id="ti">150</span>
 </div>
 
-<canvas id="canvas"></canvas>
+<div id="msg"></div>
+
+<canvas id="game"></canvas>
 
 <script>
-'use strict';
+const CFG={TIME:150,WALK:5,SPRINT:9,MAX:40};
 
-// ===== CONFIG =====
-const CFG = {
-  TIME: 150,
-  WALK: 5,
-  SPRINT: 9,
-  MAX_CARRY: 40
-};
+let scene,camera,renderer,clock;
+let player=new THREE.Vector3(0,1.8,5);
+let yaw=0,pitch=0,keys={};
 
-// ===== STATE =====
-let scene, camera, renderer, clock;
-let keys = {};
-let yaw = 0, pitch = 0;
-let player = new THREE.Vector3(0,1.8,5);
+let carry=0,total=0,heat=0,stam=100,timeLeft=CFG.TIME;
 
-let carry = 0;
-let total = 0;
-let timeLeft = CFG.TIME;
+let iron=[],police;
 
-let iron = [];
-
-// ===== INIT =====
+// INIT
 function init(){
-  const canvas = document.getElementById("canvas");
+ renderer=new THREE.WebGLRenderer({canvas:game,antialias:true});
+ renderer.setSize(innerWidth,innerHeight);
 
-  renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
+ scene=new THREE.Scene();
+ scene.background=new THREE.Color(0x111122);
 
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111122);
+ camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,200);
+ camera.position.copy(player);
 
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 200);
-  camera.position.copy(player);
+ clock=new THREE.Clock();
 
-  clock = new THREE.Clock();
+ scene.add(new THREE.AmbientLight(0xffffff,0.5));
+ let l=new THREE.DirectionalLight(0xffffff,1);
+ l.position.set(10,20,10);
+ scene.add(l);
 
-  // světlo
-  scene.add(new THREE.AmbientLight(0xffffff,0.5));
-  const light = new THREE.DirectionalLight(0xffffff,1);
-  light.position.set(10,20,10);
-  scene.add(light);
+ let g=new THREE.Mesh(
+  new THREE.PlaneGeometry(200,200),
+  new THREE.MeshStandardMaterial({color:0x222222})
+ );
+ g.rotation.x=-Math.PI/2;
+ scene.add(g);
 
-  // zem
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(200,200),
-    new THREE.MeshStandardMaterial({color:0x222222})
-  );
-  ground.rotation.x = -Math.PI/2;
-  scene.add(ground);
+ spawnIron();
 
-  // budovy
-  for(let i=0;i<20;i++){
-    const b = new THREE.Mesh(
-      new THREE.BoxGeometry(5,5+Math.random()*10,5),
-      new THREE.MeshStandardMaterial({color:0x333344})
-    );
-    b.position.set((Math.random()-0.5)*80, b.scale.y/2, (Math.random()-0.5)*80);
-    scene.add(b);
-  }
+ let van=new THREE.Mesh(
+  new THREE.BoxGeometry(3,2,5),
+  new THREE.MeshStandardMaterial({color:0x44ff88})
+ );
+ van.position.set(0,1,0);
+ van.name="van";
+ scene.add(van);
 
-  // železo
-  for(let i=0;i<25;i++){
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(1,1,1),
-      new THREE.MeshStandardMaterial({color:0xff6a00})
-    );
-    box.position.set((Math.random()-0.5)*50,0.5,(Math.random()-0.5)*50);
-    scene.add(box);
-    iron.push(box);
-  }
+ police=new THREE.Mesh(
+  new THREE.BoxGeometry(1,2,1),
+  new THREE.MeshStandardMaterial({color:0x4444ff})
+ );
+ police.position.set(10,1,10);
+ scene.add(police);
 
-  // dodávka (cíl)
-  const van = new THREE.Mesh(
-    new THREE.BoxGeometry(3,2,5),
-    new THREE.MeshStandardMaterial({color:0x44ff88})
-  );
-  van.position.set(0,1,0);
-  van.name = "van";
-  scene.add(van);
-
-  setupInput();
-  startTimer();
-  animate();
+ input();
+ timer();
+ loop();
 }
 
-// ===== INPUT =====
-function setupInput(){
-  document.addEventListener("keydown",e=>{
-    keys[e.code]=true;
-
-    if(e.code==="KeyE") interact();
-  });
-
-  document.addEventListener("keyup",e=>keys[e.code]=false);
-
-  document.addEventListener("mousemove",e=>{
-    if(document.pointerLockElement){
-      yaw -= e.movementX*0.002;
-      pitch -= e.movementY*0.002;
-      pitch=Math.max(-1.5,Math.min(1.5,pitch));
-    }
-  });
-
-  document.body.onclick = ()=> document.body.requestPointerLock();
+// SPAWN
+function spawnIron(){
+ for(let i=0;i<30;i++){
+  let b=new THREE.Mesh(
+   new THREE.BoxGeometry(1,1,1),
+   new THREE.MeshStandardMaterial({color:0xff6a00})
+  );
+  b.position.set(rand(-60,60),0.5,rand(-60,60));
+  scene.add(b);
+  iron.push(b);
+ }
 }
 
-// ===== INTERACT =====
+// INPUT
+function input(){
+ onkeydown=e=>{keys[e.code]=true;if(e.code==="KeyE")interact();};
+ onkeyup=e=>keys[e.code]=false;
+ onmousemove=e=>{
+  if(document.pointerLockElement){
+   yaw-=e.movementX*0.002;
+   pitch=clamp(pitch-e.movementY*0.002,-1.5,1.5);
+  }
+ };
+ onclick=()=>document.body.requestPointerLock();
+}
+
+// INTERACT
 function interact(){
-  // sběr
-  for(let i=0;i<iron.length;i++){
-    const obj = iron[i];
-    if(!obj.visible) continue;
-
-    if(obj.position.distanceTo(player) < 2){
-      if(carry + 5 > CFG.MAX_CARRY) return;
-
-      obj.visible = false;
-      carry += 5;
-      updateHUD();
-      return;
-    }
+ for(let o of iron){
+  if(o.visible && dist(o.position,player)<2){
+   if(carry>=CFG.MAX){msg("Plný batoh");return;}
+   o.visible=false;
+   carry+=5;
+   heat+=10;
+   return;
   }
+ }
 
-  // dodávka
-  const van = scene.getObjectByName("van");
-  if(van.position.distanceTo(player) < 4){
-    total += carry;
-    carry = 0;
-    updateHUD();
-  }
+ let van=scene.getObjectByName("van");
+ if(dist(van.position,player)<4){
+  total+=carry;
+  carry=0;
+  msg("Naloženo!");
+ }
 }
 
-// ===== TIMER =====
-function startTimer(){
-  setInterval(()=>{
-    timeLeft--;
-    document.getElementById("time").textContent = timeLeft;
-
-    if(timeLeft <= 0){
-      alert("Konec hry! Odvezeno: "+total+" kg");
-      location.reload();
-    }
-  },1000);
+// TIMER
+function timer(){
+ setInterval(()=>{
+  if(timeLeft<=0)return;
+  timeLeft--;
+  if(timeLeft===0) end("Konec! "+total+" kg");
+ },1000);
 }
 
-// ===== UPDATE =====
+// UPDATE
 function update(){
-  const dt = clock.getDelta();
+ let dt=Math.min(clock.getDelta(),0.05);
 
-  let speed = (keys["ShiftLeft"]?CFG.SPRINT:CFG.WALK) * dt;
+ let sprint=keys["ShiftLeft"]&&stam>0;
+ let speed=(sprint?CFG.SPRINT:CFG.WALK)*dt;
 
-  let dir = new THREE.Vector3();
+ stam=clamp(stam+(sprint?-30:20)*dt,0,100);
 
-  if(keys["KeyW"]) dir.z -= 1;
-  if(keys["KeyS"]) dir.z += 1;
-  if(keys["KeyA"]) dir.x -= 1;
-  if(keys["KeyD"]) dir.x += 1;
+ let dir=new THREE.Vector3();
+ if(keys["KeyW"])dir.z--;
+ if(keys["KeyS"])dir.z++;
+ if(keys["KeyA"])dir.x--;
+ if(keys["KeyD"])dir.x++;
 
-  if(dir.length()>0){
-    dir.normalize();
-    dir.applyEuler(new THREE.Euler(0,yaw,0));
-    player.add(dir.multiplyScalar(speed));
+ if(dir.length()>0){
+  dir.normalize().applyEuler(new THREE.Euler(0,yaw,0));
+  player.add(dir.multiplyScalar(speed));
+ }
+
+ // POLICE
+ if(heat>50){
+  let d=player.clone().sub(police.position);
+  let distLen=d.length();
+  if(distLen>0){
+    d.normalize();
+    police.position.add(d.multiplyScalar(4*dt));
   }
+  if(distLen<1.5) end("Chycen policií!");
+ }
 
-  camera.position.copy(player);
-  camera.rotation.order="YXZ";
-  camera.rotation.y=yaw;
-  camera.rotation.x=pitch;
+ heat=clamp(heat-5*dt,0,100);
+
+ camera.position.copy(player);
+ camera.rotation.order="YXZ";
+ camera.rotation.y=yaw;
+ camera.rotation.x=pitch;
+
+ hud();
 }
 
-// ===== HUD =====
-function updateHUD(){
-  document.getElementById("carry").textContent = carry;
-  document.getElementById("total").textContent = total;
+// HUD
+function hud(){
+ c.textContent=carry;
+ t.textContent=total;
+ h.textContent=Math.floor(heat);
+ s.textContent=Math.floor(stam);
+ ti.textContent=timeLeft;
 }
 
-// ===== LOOP =====
-function animate(){
-  requestAnimationFrame(animate);
-  update();
-  renderer.render(scene,camera);
+// LOOP
+function loop(){
+ requestAnimationFrame(loop);
+ update();
+ renderer.render(scene,camera);
+}
+
+// UTILS
+function clamp(v,min,max){return Math.max(min,Math.min(max,v));}
+function rand(a,b){return Math.random()*(b-a)+a;}
+function dist(a,b){return a.distanceTo(b);}
+
+// MSG
+let msgTO;
+function msg(t){
+ msgEl.textContent=t;
+ clearTimeout(msgTO);
+ msgTO=setTimeout(()=>msgEl.textContent="",2000);
+}
+
+// END
+function end(t){
+ msg(t);
+ setTimeout(()=>location.reload(),2000);
 }
 
 // START
-window.onload = init;
+init();
 </script>
-
 </body>
 </html>
