@@ -1,188 +1,290 @@
 <!DOCTYPE html>
 <html lang="cs">
 <head>
-<meta charset="UTF-8">
-<title>Hylváty Heist – Ultra Realistická Verze (FIXED)</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<style>
-html,body{margin:0;height:100%;overflow:hidden;background:#000}
-canvas{display:block}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TURBO ŽELEZO: HYLVÁTY 300m</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; overflow: hidden; background: #000; }
+        
+        #menu, #shop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); color: white;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 1000; text-align: center;
+        }
+        #shop { display: none; }
+        h1 { color: #ff6600; text-shadow: 0 0 20px #ff6600; font-size: 3em; margin-bottom: 10px; }
+        button { 
+            background: #ff6600; color: white; border: none; padding: 15px 40px; 
+            font-size: 1.2em; border-radius: 50px; cursor: pointer; margin: 10px; 
+            font-weight: bold; transition: 0.2s;
+        }
+        button:hover { transform: scale(1.05); background: #ff8800; }
+
+        #gameUI { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; display: none; }
+        #stats { 
+            position: absolute; top: 20px; left: 20px; color: white; 
+            background: rgba(0,0,0,0.8); padding: 15px; border-radius: 10px; 
+            border-left: 5px solid #00d4ff;
+        }
+        #minimapContainer { 
+            position: fixed; bottom: 20px; right: 20px; width: 160px; height: 160px; 
+            background: rgba(0,0,0,0.8); border: 2px solid #555; border-radius: 10px; overflow: hidden; 
+        }
+        #minimap { width: 100%; height: 100%; }
+        #crosshair { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #00ff00; font-size: 24px; }
+    </style>
 </head>
 <body>
-<canvas id="canvas"></canvas>
 
-<script>
-'use strict';
+    <div id="menu">
+        <h1>🔩 HYLVÁTY 300m 🔩</h1>
+        <p>Mapa 300x300m. Země: podlaha.jpg. Najdi shop (F)!</p>
+        <button onclick="startGame()">START</button>
+    </div>
 
-// CONFIG
-const CFG={TIME:150,WALK:5.5,SPRINT:10.5,H:1.78};
+    <div id="shop">
+        <h1>OBCHODNÍ CENTRUM</h1>
+        <p>Peníze: <span id="moneyUI_shop">0</span> Kč</p>
+        <button onclick="buyBackpack()">VĚTŠÍ BATOH (kapacita 100) - 500 Kč</button>
+        <button onclick="closeShop()">ZAVŘÍT (ESC)</button>
+    </div>
 
-// STATE
-let scene,camera,renderer,clock;
-let keys={},yaw=0,pitch=0;
-let playerPos=new THREE.Vector3(2,CFG.H,2);
+    <div id="gameUI">
+        <div id="stats">
+            ŽELEZO: <span id="ironCountUI">0</span> / <span id="capacityUI">50</span><br>
+            PENÍZE: <span id="moneyUI_game">0</span> Kč<br>
+            HP: <span id="healthUI">100</span>%
+        </div>
+        <div id="crosshair">+</div>
+        <div id="minimapContainer"><canvas id="minimap" width="160" height="160"></canvas></div>
+    </div>
 
-// AUDIO (FIX)
-let audioCtx=null;
-function initAudio(){
-  try{
-    audioCtx=new(window.AudioContext||window.webkitAudioContext)();
-  }catch(e){
-    console.warn("Audio nepodporováno");
-  }
-}
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/controls/PointerLockControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128/examples/js/loaders/GLTFLoader.js"></script>
 
-// TEXTURE FIX
-function mkTex(fn){
-  const t=new THREE.CanvasTexture(fn());
-  t.wrapS=t.wrapT=THREE.RepeatWrapping;
-  return t;
-}
+    <script>
+        let scene, camera, renderer, controls;
+        let irons = [], police = [], buildingBoxes = [], ironCount = 0, money = 0, health = 100, capacity = 50;
+        let keys = { w:false, s:false, a:false, d:false };
+        let shopOpen = false;
 
-function asphaltTex(){
-  return mkTex(()=>{
-    const c=document.createElement('canvas');
-    c.width=c.height=256;
-    const x=c.getContext('2d');
+        const MAP_SIZE = 300; 
+        const groundTexturePath = 'podlaha.jpg'; // Nastaveno na tvůj soubor
+        const policeModelPath = 'model.glb';
 
-    x.fillStyle='#16161c';
-    x.fillRect(0,0,256,256);
+        function startGame() {
+            document.getElementById('menu').style.display = 'none';
+            document.getElementById('gameUI').style.display = 'block';
+            init();
+        }
 
-    for(let i=0;i<5000;i++){
-      x.fillStyle=`rgba(255,255,255,${Math.random()*0.03})`;
-      x.fillRect(Math.random()*256,Math.random()*256,1,1);
-    }
-    return c;
-  });
-}
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020205);
+            scene.fog = new THREE.Fog(0x020205, 10, 180);
 
-// INIT
-function init(){
-  const canvas=document.getElementById('canvas');
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 500);
+            renderer = new THREE.WebGLRenderer({antialias: true});
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
 
-  renderer=new THREE.WebGLRenderer({canvas,antialias:true});
-  renderer.setSize(window.innerWidth,window.innerHeight);
+            controls = new THREE.PointerLockControls(camera, renderer.domElement);
+            controls.getObject().position.set(0, 1.7, 0);
+            scene.add(controls.getObject());
 
-  scene=new THREE.Scene();
-  scene.background=new THREE.Color(0x0d0e18);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-  camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,200);
-  camera.position.copy(playerPos);
+            // ZEMĚ (300x300) s texturou podlaha.jpg
+            const texLoader = new THREE.TextureLoader();
+            const groundTex = texLoader.load(groundTexturePath);
+            groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+            groundTex.repeat.set(20, 20); // Hustota opakování textury
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE), new THREE.MeshStandardMaterial({map: groundTex}));
+            ground.rotation.x = -Math.PI/2;
+            scene.add(ground);
 
-  clock=new THREE.Clock();
+            // HRANICE MAPY (Neviditelné zdi)
+            const wallMat = new THREE.MeshBasicMaterial({visible: false});
+            const createWall = (w, h, d, x, z) => {
+                const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                wall.position.set(x, h/2, z);
+                scene.add(wall);
+                buildingBoxes.push(new THREE.Box3().setFromObject(wall));
+            };
+            createWall(MAP_SIZE, 50, 1, 0, MAP_SIZE/2);  
+            createWall(MAP_SIZE, 50, 1, 0, -MAP_SIZE/2); 
+            createWall(1, 50, MAP_SIZE, MAP_SIZE/2, 0);  
+            createWall(1, 50, MAP_SIZE, -MAP_SIZE/2, 0); 
 
-  const light=new THREE.DirectionalLight(0xffffff,1);
-  light.position.set(10,20,10);
-  scene.add(light);
+            // MĚSTO (40 budov v prostoru 300x300)
+            for(let i=0; i<40; i++) {
+                const h = 10 + Math.random()*30;
+                const b = new THREE.Mesh(new THREE.BoxGeometry(20, h, 20), new THREE.MeshStandardMaterial({color: 0x1a1a1c}));
+                b.position.set((Math.random()-0.5)*(MAP_SIZE-40), h/2, (Math.random()-0.5)*(MAP_SIZE-40));
+                scene.add(b);
+                buildingBoxes.push(new THREE.Box3().setFromObject(b));
+            }
 
-  const amb=new THREE.AmbientLight(0x404040);
-  scene.add(amb);
+            // ŽELEZO
+            for(let i=0; i<40; i++) {
+                const iron = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1.2), new THREE.MeshStandardMaterial({color: 0xffaa00}));
+                iron.position.set((Math.random()-0.5)*(MAP_SIZE-20), 0.5, (Math.random()-0.5)*(MAP_SIZE-20));
+                scene.add(iron);
+                irons.push(iron);
+            }
 
-  // GROUND
-  const ground=new THREE.Mesh(
-    new THREE.PlaneGeometry(200,200),
-    new THREE.MeshStandardMaterial({map:asphaltTex()})
-  );
-  ground.rotation.x=-Math.PI/2;
-  scene.add(ground);
+            // 3 POLICISTÉ
+            const gltfLoader = new THREE.GLTFLoader();
+            for(let i=0; i<3; i++) {
+                gltfLoader.load(policeModelPath, (gltf) => {
+                    const p = gltf.scene;
+                    p.scale.set(1.5, 1.5, 1.5);
+                    const group = new THREE.Group();
+                    group.add(p);
+                    group.position.set((Math.random()-0.5)*200, 0, (Math.random()-0.5)*200);
+                    scene.add(group);
+                    police.push(group);
+                }, undefined, () => {
+                    const group = new THREE.Group();
+                    group.add(new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), new THREE.MeshStandardMaterial({color: 0x0055ff})));
+                    group.position.set((Math.random()-0.5)*200, 1.5, (Math.random()-0.5)*200);
+                    scene.add(group);
+                    police.push(group);
+                });
+            }
 
-  // BUILDINGS
-  for(let i=0;i<20;i++){
-    const b=new THREE.Mesh(
-      new THREE.BoxGeometry(5,5+Math.random()*10,5),
-      new THREE.MeshStandardMaterial({color:0x333344})
-    );
-    b.position.set((Math.random()-0.5)*80,b.scale.y/2,(Math.random()-0.5)*80);
-    scene.add(b);
-  }
+            setupInput();
+            animate();
+        }
 
-  // IRON OBJECTS
-  for(let i=0;i<30;i++){
-    const box=new THREE.Mesh(
-      new THREE.BoxGeometry(1,1,1),
-      new THREE.MeshStandardMaterial({color:0xff6a00})
-    );
-    box.position.set((Math.random()-0.5)*60,0.5,(Math.random()-0.5)*60);
-    scene.add(box);
-  }
+        function setupInput() {
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'KeyW') keys.w = true;
+                if (e.code === 'KeyS') keys.s = true;
+                if (e.code === 'KeyA') keys.a = true;
+                if (e.code === 'KeyD') keys.d = true;
+                if (e.code === 'KeyE') collectIron();
+                if (e.code === 'KeyF') toggleShop();
+                if (e.code === 'Escape' && shopOpen) closeShop();
+            });
+            document.addEventListener('keyup', (e) => {
+                if (e.code === 'KeyW') keys.w = false;
+                if (e.code === 'KeyS') keys.s = false;
+                if (e.code === 'KeyA') keys.a = false;
+                if (e.code === 'KeyD') keys.d = false;
+            });
+            renderer.domElement.addEventListener('click', () => { if(!shopOpen) controls.lock(); });
+        }
 
-  // VEHICLES (FIXED MINUS!)
-  const vehicles=[
-    [20,0,-16,0x334455],
-    [-15,0,-26,0x553322], // ← opraveno
-    [5,0,-36,0x224433],
-    [-30,0,20,0x443322]
-  ];
+        function collectIron() {
+            const pPos = controls.getObject().position;
+            for(let i=irons.length-1; i>=0; i--) {
+                if(irons[i].position.distanceTo(pPos) < 5 && ironCount < capacity) {
+                    scene.remove(irons[i]);
+                    irons.splice(i, 1);
+                    ironCount++;
+                    money += 20;
+                    updateUI();
+                }
+            }
+        }
 
-  vehicles.forEach(v=>{
-    const car=new THREE.Mesh(
-      new THREE.BoxGeometry(2,1,4),
-      new THREE.MeshStandardMaterial({color:v[3]})
-    );
-    car.position.set(v[0],0.5,v[2]);
-    scene.add(car);
-  });
+        function toggleShop() {
+            shopOpen = true;
+            controls.unlock();
+            document.getElementById('shop').style.display = 'flex';
+        }
 
-  setupInput();
-  animate();
-}
+        function closeShop() {
+            shopOpen = false;
+            document.getElementById('shop').style.display = 'none';
+            controls.lock();
+        }
 
-// INPUT
-function setupInput(){
-  document.addEventListener('keydown',e=>keys[e.code]=true);
-  document.addEventListener('keyup',e=>keys[e.code]=false);
+        function buyBackpack() {
+            if (money >= 500) {
+                money -= 500;
+                capacity = 100;
+                updateUI();
+                alert("Batoh vylepšen na 100 kusů!");
+            }
+        }
 
-  document.addEventListener('mousemove',e=>{
-    if(document.pointerLockElement){
-      yaw -= e.movementX*0.002;
-      pitch -= e.movementY*0.002;
-      pitch=Math.max(-1.5,Math.min(1.5,pitch));
-    }
-  });
+        function updateUI() {
+            document.getElementById('ironCountUI').textContent = ironCount;
+            document.getElementById('capacityUI').textContent = capacity;
+            document.getElementById('moneyUI_game').textContent = money;
+            document.getElementById('moneyUI_shop').textContent = money;
+        }
 
-  document.body.addEventListener('click',()=>{
-    document.body.requestPointerLock();
-  });
-}
+        function drawMinimap() {
+            const canvas = document.getElementById('minimap');
+            const ctx = canvas.getContext('2d');
+            const pPos = controls.getObject().position;
+            
+            const dir = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+            const angle = Math.atan2(dir.x, dir.z);
 
-// UPDATE
-function update(){
-  const dt=Math.min(clock.getDelta(),0.05);
+            ctx.clearRect(0,0,160,160);
+            
+            ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+            ctx.beginPath();
+            ctx.moveTo(80, 80);
+            ctx.arc(80, 80, 40, angle - 0.6, angle + 0.6);
+            ctx.fill();
 
-  const speed=(keys["ShiftLeft"]?CFG.SPRINT:CFG.WALK)*dt;
+            ctx.fillStyle = "red";
+            ctx.beginPath(); ctx.arc(80, 80, 4, 0, Math.PI*2); ctx.fill();
 
-  let dir=new THREE.Vector3();
+            ctx.fillStyle = "#00d4ff";
+            police.forEach(p => {
+                let dx = (p.position.x - pPos.x) / (MAP_SIZE/160) + 80;
+                let dz = (p.position.z - pPos.z) / (MAP_SIZE/160) + 80;
+                if (dx > 0 && dx < 160 && dz > 0 && dz < 160) {
+                    ctx.beginPath(); ctx.arc(dx, dz, 3, 0, Math.PI*2); ctx.fill();
+                }
+            });
+        }
 
-  if(keys["KeyW"])dir.z-=1;
-  if(keys["KeyS"])dir.z+=1;
-  if(keys["KeyA"])dir.x-=1;
-  if(keys["KeyD"])dir.x+=1;
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!controls.isLocked || shopOpen) return;
 
-  if(dir.length()>0){
-    dir.normalize();
-    dir.applyEuler(new THREE.Euler(0,yaw,0));
-    playerPos.add(dir.multiplyScalar(speed));
-  }
+            const oldPos = controls.getObject().position.clone();
+            if (keys.w) controls.moveForward(0.6);
+            if (keys.s) controls.moveForward(-0.6);
+            if (keys.a) controls.moveRight(-0.6);
+            if (keys.d) controls.moveRight(0.6);
 
-  camera.position.copy(playerPos);
-  camera.rotation.order="YXZ";
-  camera.rotation.y=yaw;
-  camera.rotation.x=pitch;
-}
+            const pBox = new THREE.Box3().setFromCenterAndSize(controls.getObject().position, new THREE.Vector3(1, 2, 1));
+            for(let box of buildingBoxes) {
+                if(pBox.intersectsBox(box)) controls.getObject().position.copy(oldPos);
+            }
 
-// LOOP
-function animate(){
-  requestAnimationFrame(animate);
-  update();
-  renderer.render(scene,camera);
-}
+            police.forEach(p => {
+                const dist = p.position.distanceTo(controls.getObject().position);
+                if(dist < 100) {
+                    p.lookAt(controls.getObject().position.x, 0, controls.getObject().position.z);
+                    const dir = new THREE.Vector3().subVectors(controls.getObject().position, p.position).normalize();
+                    p.position.add(dir.multiplyScalar(0.35));
+                    
+                    if(p.children[0]) p.children[0].position.y = Math.abs(Math.sin(Date.now()*0.01)) * 0.1;
 
-// START
-window.addEventListener('load',()=>{
-  initAudio();
-  init();
-});
-</script>
+                    if(dist < 3) {
+                        health -= 0.4;
+                        document.getElementById('healthUI').textContent = Math.floor(health);
+                        if(health <= 0) { alert("Zatčen!"); location.reload(); }
+                    }
+                }
+            });
+
+            drawMinimap();
+            renderer.render(scene, camera);
+        }
+    </script>
 </body>
 </html>
